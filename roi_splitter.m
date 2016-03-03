@@ -1,4 +1,8 @@
 function roi_splitter
+    global ct_info
+    global ct
+    global ct_roi
+    global fn;
     screenSize = get(0, 'Screensize');
 
     
@@ -88,6 +92,10 @@ end
 
 
 function roi_splitter_script_tobias()
+    global ct_info
+    global ct
+    global ct_roi
+    global fn;
 
     dirName = uigetdir('Select the target folder');
     
@@ -99,28 +107,43 @@ function roi_splitter_script_tobias()
             delim = '\\';
         end
         
-        [ct, ct_info, ct_roi, fn] = loadCTFromDICOM(dirName);
-        
+        [ct, ct_info, ct_roi, fn] = loadCTFromDICOM(dirName);        
         
         
         ct_mask = convertROItoMask(ct, ct_roi);
         if length(unique(ct_mask(:)))==1,
             [roi_split,cross_split] = ROI_Splitter_Tobias(ct);
         else
-            [roi_split,cross_split] = ROI_Splitter_Tobias(ct,ct_mask);
+            [showNewFig, figHandles] = checkIfFigureAlreadyExists();
+            if showNewFig
+                f = figure('Visible','on','Name','Show Slice',...
+               'Position',[360,500,600,600],'resize','on','units','characters');
+            else
+                f = figHandles;
+            end
+            [roi_split,cross_split] = ROI_Splitter_Tobias(ct,ct_mask, f);
         end
         
-        s_uid = ct_info{1}.SeriesInstanceUID;
-        
-        folder_name = textscan(fn,'%s','delimiter',delim);
-        folder_name = folder_name{:};
-        folder_name = folder_name(end);
-        folder_name = folder_name{:};
-        
-        ct_info = ct_info{1};
-        
-        save(strcat(fn,delim,folder_name,'_roi_split_tobias.mat'), 's_uid', 'roi_split', 'cross_split', 'ct_info');
+
     end
+end
+
+function [showNewFig, figHandles] = checkIfFigureAlreadyExists()
+%Get the handle of all opnened figures
+figHandles = get(0,'Children');
+
+if isempty(figHandles)
+    showNewFig = 1;
+else
+    currentFigureName = get(figHandles, 'Name');
+    if strcmp(currentFigureName, 'Show Slice');
+        showNewFig = 0;
+    else
+        showNewFig = 1;
+    end
+
+end
+    
 end
 
 function [ct, ct_info, ct_roi, dirName] = loadCTFromDICOM(dirName)
@@ -318,7 +341,7 @@ function [ct, ct_info, ct_roi, dirName] = loadCTFromDICOM(dirName)
  
 end
 
-function [roi_split, cross_split] = ROI_Splitter_Tobias(volume, seg)
+function [roi_split, cross_split] = ROI_Splitter_Tobias(volume, seg, f)
 
 if nargin==1,
     seg = zeros(size(volume));
@@ -327,8 +350,6 @@ else
     inside_mask = seg;
 end
 
-f = figure('Visible','on','Name','Show Slice',...
-           'Position',[360,500,600,600],'resize','on','units','characters');
 % Create an axes object to show which color is selected
 Img = axes('Parent',f,'units','normalized',...
            'Position',[.05 .031 .85 .85]);
@@ -343,13 +364,13 @@ set(f, 'KeyPressFcn', @keypress_fct);
 
 button_load = uicontrol('Style', 'pushbutton', 'String', 'Load DICOM',...
         'Units', 'Normalized', 'Position', [0.35 0.9 0.15 0.05],...
-        'Callback', '@buttonpress_load_fct');  
+        'Callback', @buttonpress_load_fct);  
 button_save_matlab = uicontrol('Style', 'pushbutton', 'String', 'Save Matlab',...
         'Units', 'Normalized', 'Position', [0.05 0.9 0.15 0.05],...
-        'Callback', '@buttonpress_save_mtlb_fct'); 
-button_save_excel = uicontrol('Style', 'pushbutton', 'String', 'Save Excel',...
-        'Units', 'Normalized', 'Position', [0.20 0.9 0.15 0.05],...
-        'Callback', '@buttonpress_save_excel_fct'); 
+        'Callback', @buttonpress_save_mtlb_fct); 
+%button_save_excel = uicontrol('Style', 'pushbutton', 'String', 'Save Excel',...
+%        'Units', 'Normalized', 'Position', [0.20 0.9 0.15 0.05],...
+%        'Callback', '@buttonpress_save_excel_fct'); 
 
 
 movegui(Img,'onscreen')% To display application onscreen
@@ -475,7 +496,7 @@ set(findobj(gcf,'type','axes'),'hittest','on');
  
  updateMask();
  
- waitfor(f);
+ %waitfor(f);
  
  
     function updateMask()
@@ -530,10 +551,27 @@ set(findobj(gcf,'type','axes'),'hittest','on');
     end
 
     function buttonpress_load_fct(h, eventdata)
-        
+        roi_splitter_script_tobias();
     end
 
     function buttonpress_save_mtlb_fct(h, eventdata)
+        global ct_info
+        global ct
+        global ct_roi
+        global fn;
+        
+
+        s_uid = ct_info{1}.SeriesInstanceUID;
+        
+        folder_name = textscan(fn,'%s','delimiter',filesep);
+        folder_name = folder_name{:};
+        folder_name = folder_name(end);
+        folder_name = folder_name{:};
+        
+        ct_info_resume = ct_info{1};
+        
+        save(strcat(fn,filesep,folder_name,'_roi_split_tobias.mat'),...
+            's_uid', 'roi_split', 'cross_split', 'ct_info_resume');
         
     end
 
