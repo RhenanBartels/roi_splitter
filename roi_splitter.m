@@ -3,6 +3,7 @@ function roi_splitter
     global ct
     global ct_roi
     global fn;
+    global cross_split;
     screenSize = get(0, 'Screensize');
 
     
@@ -96,6 +97,7 @@ function roi_splitter_script_tobias()
     global ct
     global ct_roi
     global fn;
+    global cross_split
 
     dirName = uigetdir('Select the target folder');
     
@@ -342,6 +344,11 @@ function [ct, ct_info, ct_roi, dirName] = loadCTFromDICOM(dirName)
 end
 
 function [roi_split, cross_split] = ROI_Splitter_Tobias(volume, seg, f)
+global ct_info
+global ct
+global ct_roi
+global fn;
+global cross_split
 
 if nargin==1,
     seg = zeros(size(volume));
@@ -368,9 +375,9 @@ button_load = uicontrol('Style', 'pushbutton', 'String', 'Load DICOM',...
 button_save_matlab = uicontrol('Style', 'pushbutton', 'String', 'Save Matlab',...
         'Units', 'Normalized', 'Position', [0.05 0.9 0.15 0.05],...
         'Callback', @buttonpress_save_mtlb_fct); 
-%button_save_excel = uicontrol('Style', 'pushbutton', 'String', 'Save Excel',...
-%        'Units', 'Normalized', 'Position', [0.20 0.9 0.15 0.05],...
-%        'Callback', '@buttonpress_save_excel_fct'); 
+button_save_excel = uicontrol('Style', 'pushbutton', 'String', 'Open Gui Slicer',...
+        'Units', 'Normalized', 'Position', [0.20 0.9 0.15 0.05],...
+        'Callback', @buttonpress_save_excel_fct); 
 
 
 movegui(Img,'onscreen')% To display application onscreen
@@ -555,14 +562,12 @@ set(findobj(gcf,'type','axes'),'hittest','on');
     end
 
     function buttonpress_save_mtlb_fct(h, eventdata)
-        global ct_info
-        global ct
-        global ct_roi
-        global fn;
+;
         
-
+        
+ 
         s_uid = ct_info{1}.SeriesInstanceUID;
-        
+        cross_split = cross_split;
         folder_name = textscan(fn,'%s','delimiter',filesep);
         folder_name = folder_name{:};
         folder_name = folder_name(end);
@@ -576,6 +581,7 @@ set(findobj(gcf,'type','axes'),'hittest','on');
     end
 
     function buttonpress_save_excel_fct(h, eventdata)
+        GUI_slicer(ct, false, cross_split, []);
         
     end
  
@@ -819,5 +825,69 @@ function inside_mask = computeThoraxInsideMask(thorax_mask)
     end
     inside_mask = ones(size(thorax_mask));
     inside_mask(find(ct_thorax_hull==0)) = 0;
+end
+
+function f = GUI_slicer(volume, isLabelMap, transparentMask, cm)
+%% Beginning of outer function red_blue
+% Create figure
+
+if nargin<4,
+    cm = [];
+end
+
+f = figure('Visible','on','Name','Show Slice',...
+           'Position',[360,500,600,600],'resize','on','units','characters');
+% Create an axes object to show which color is selected
+Img = axes('Parent',f,'units','normalized',...
+           'Position',[.05 .01 .85 .85]);
+% Create a slider to display the images
+slider1 = uicontrol('Style', 'slider', 'Parent', f, 'String', 'Image No.', 'Units', 'normalized','Callback', @slider_callback, ...
+     'Position', [.05 .001 .85 .2]);
+
+text1 = uicontrol('style','text','parent',f,'string','slice number','units','pixel','position',[50 5 100 20]);
+
+handle.listener(slider1,'ActionEvent',@slider_callback);
+
+
+movegui(Img,'onscreen')% To display application onscreen
+movegui(Img,'center') % To display application in the center of screen
+
+if isLabelMap,
+    imshow(label2rgb(volume(:,:,1)));
+else
+    %imshow(volume(:,:,1),'displayrange',[]);
+    imshow(volume(:,:,1),cm);
+end
+
+green_image = cat(3,zeros(size(volume,1)),ones(size(volume,1)), zeros(size(volume,1)));
+
+if size(transparentMask,1)>0,
+    hold on; h = imshow(green_image); hold off;
+    set(h,'AlphaData',0.25*transparentMask(:,:,1));
+end
+
+set(findobj(gcf,'type','axes'),'hittest','off');
+ 
+ set(slider1, 'Min', 1);
+ set(slider1, 'Max', size(volume,3));
+ set(slider1, 'value', 1);
+ set(slider1, 'SliderStep', [1/size(volume,3) 1/size(volume,3)]);
+ 
+%% Beginning of slider callback function
+    function slider_callback(h, eventdata)
+        currentSlice = uint32(get(slider1,'value'));
+        axes(Img);
+        if isLabelMap,
+            imshow(label2rgb(volume(:,:,currentSlice)));
+        else
+            %imshow(volume(:,:,currentSlice),'displayrange',[]);
+            imshow(volume(:,:,currentSlice),cm);
+        end
+        if size(transparentMask,1)>0,
+            hold on; h = imshow(green_image); hold off;
+            set(h,'AlphaData',0.25*transparentMask(:,:,currentSlice));
+        end
+        set(text1,'String',num2str(currentSlice));
+    end
 end
     
