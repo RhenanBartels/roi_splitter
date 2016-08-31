@@ -28,22 +28,28 @@ end
 function prepareEnviroment()  
     missingDependency = checkForDependencies();
     
-    if ~missingDependency        
-        init_toolbox(['dependencies' filesep 'toolbox']);
-        addpath(['dependencies'  filesep 'xlwrite']);        
-        
-        xlwriteFolder = ['dependencies' filesep 'xlwrite'];
-        
-        javaaddpath([xlwriteFolder filesep 'poi_library' filesep 'poi-3.8-20120326.jar']);
-        javaaddpath([xlwriteFolder filesep 'poi_library' filesep 'poi-ooxml-3.8-20120326.jar']);
-        javaaddpath([xlwriteFolder filesep 'poi_library' filesep '/poi-ooxml-schemas-3.8-20120326.jar']);
-        javaaddpath([xlwriteFolder filesep 'poi_library' filesep 'xmlbeans-2.3.0.jar']);
-        javaaddpath([xlwriteFolder filesep 'poi_library' filesep '/dom4j-1.6.1.jar']);
-        javaaddpath([xlwriteFolder filesep 'poi_library' filesep '/stax-api-1.0.1.jar']);
-        
-    else
-        disp('raise exception')
-    end
+    
+    pathCell = regexp(path, pathsep, 'split');
+    
+    %if ~findstr(pathCell{1}, 'dependencies')
+        if ~missingDependency
+            init_toolbox(['dependencies' filesep 'toolbox']);
+            addpath(['dependencies'  filesep 'xlwrite']);
+            addpath(['dependencies' filesep 'NIfTI_20140122/']);
+            
+            xlwriteFolder = ['dependencies' filesep 'xlwrite'];
+            
+            javaaddpath([xlwriteFolder filesep 'poi_library' filesep 'poi-3.8-20120326.jar']);
+            javaaddpath([xlwriteFolder filesep 'poi_library' filesep 'poi-ooxml-3.8-20120326.jar']);
+            javaaddpath([xlwriteFolder filesep 'poi_library' filesep '/poi-ooxml-schemas-3.8-20120326.jar']);
+            javaaddpath([xlwriteFolder filesep 'poi_library' filesep 'xmlbeans-2.3.0.jar']);
+            javaaddpath([xlwriteFolder filesep 'poi_library' filesep '/dom4j-1.6.1.jar']);
+            javaaddpath([xlwriteFolder filesep 'poi_library' filesep '/stax-api-1.0.1.jar']);
+            
+        else
+            disp('raise exception')
+        end
+   % end
 end
 
 function init_toolbox(base_path)
@@ -75,7 +81,8 @@ function missingDependency = checkForDependencies()
             counter = 1;
                for index = 1:nInsideElements
                    if strcmp(insideFoldersAndFiles(index).name, 'toolbox') ||...
-                       strcmp(insideFoldersAndFiles(index).name, 'xlwrite')
+                       strcmp(insideFoldersAndFiles(index).name, 'xlwrite') ||...
+                       strcmp(insideFoldersAndFiles(index).name, 'NIfTI_20140122/')
                        neededFiles{counter} = insideFoldersAndFiles(index).name;
                        counter = counter + 1;
                    end
@@ -113,9 +120,9 @@ function roi_splitter_script_tobias()
         
         
         ct_mask = convertROItoMask(ct, ct_roi);
-        if length(unique(ct_mask(:)))==1,
-            [roi_split,cross_split] = ROI_Splitter_Tobias(ct);
-        else
+        %if length(unique(ct_mask(:)))==1,
+        %    [roi_split,cross_split] = ROI_Splitter_Tobias(ct);
+        %else
             [showNewFig, figHandles] = checkIfFigureAlreadyExists();
             if showNewFig
                 f = figure('Visible','on','Name','Show Slice',...
@@ -123,8 +130,8 @@ function roi_splitter_script_tobias()
             else
                 f = figHandles;
             end
-            [roi_split,cross_split] = ROI_Splitter_Tobias(ct,ct_mask, f);
-        end
+            [roi_split, cross_split] = ROI_Splitter_Tobias(ct, [], f, dirName);
+       % end
         
 
     end
@@ -343,19 +350,39 @@ function [ct, ct_info, ct_roi, dirName] = loadCTFromDICOM(dirName)
  
 end
 
-function [roi_split, cross_split] = ROI_Splitter_Tobias(volume, seg, f)
+function [roi_split, cross_split] = ROI_Splitter_Tobias(volume, seg, f, projectPath)
 global ct_info
 global ct
 global ct_roi
 global fn;
 global cross_split
+global listWithIndexes
+global niiWithOutSegmentation
+global niiWithSegmentation
 
-if nargin==1,
-    seg = zeros(size(volume));
+%Open NII with segmentation
+niiFileNameWithSegmentation = dir([projectPath filesep '*.nii']);
+niiWithSegmentation = load_nii_with_rotation([projectPath filesep niiFileNameWithSegmentation.name]);
+
+%Open NII WITHOUT segmentation
+tenSlicesPath = getTenSlicesPath(projectPath);
+niiFileNameWithOutSegmentation = dir([tenSlicesPath filesep '*.nii']);
+niiWithOutSegmentation = load_nii_with_rotation([tenSlicesPath...
+    filesep niiFileNameWithOutSegmentation.name]);
+
+listWithIndexesPath = dir([tenSlicesPath filesep '*positions.txt']);
+%Add 1 to convert to Matlab indexes.
+listWithIndexes = importdata([tenSlicesPath filesep listWithIndexesPath.name]) + 1;
+
+roi_split = niiWithSegmentation.img;
+seg = niiWithSegmentation.img;
+
+%if nargin==1,
+    %seg = zeros(size(volume));
     inside_mask = computeThoraxInsideMask(volume>-500 & volume<150);
-else
-    inside_mask = seg;
-end
+%else
+%    inside_mask = seg;
+%end
 
 % Create an axes object to show which color is selected
 Img = axes('Parent',f,'units','normalized',...
@@ -366,19 +393,28 @@ slider1 = uicontrol('Style', 'slider', 'Parent', f, 'String', 'Image No.', 'Unit
 
 text1 = uicontrol('style','text','parent',f,'string','slice number','units','pixel','position',[50 5 100 20]);
 
-handle.listener(slider1,'ActionEvent',@slider_callback);
+if verLessThan('matlab', '8.4')
+    handle.listener(slider1,'ActionEvent',@slider_callback);
+else
+    addlistener(slider1, 'ContinuosValueChange', @slider_callback);
+end
 set(f, 'KeyPressFcn', @keypress_fct);
 
 button_load = uicontrol('Style', 'pushbutton', 'String', 'Load DICOM',...
-        'Units', 'Normalized', 'Position', [0.45 0.9 0.15 0.05],...
-        'Callback', @buttonpress_load_fct);  
-button_save_matlab = uicontrol('Style', 'pushbutton', 'String', 'Save Matlab',...
         'Units', 'Normalized', 'Position', [0.05 0.9 0.15 0.05],...
+        'Callback', @buttonpress_load_fct);  
+button_save_matlab = uicontrol('Style', 'pushbutton', 'String', 'Save Cross',...
+        'Units', 'Normalized', 'Position', [0.20 0.9 0.15 0.05],...
         'Callback', @buttonpress_save_mtlb_fct); 
-button_save_excel = uicontrol('Style', 'pushbutton', 'String', 'Open Gui Slicer',...
-        'Units', 'Normalized', 'Position', [0.20 0.9 0.25 0.05],...
-        'Callback', @buttonpress_save_excel_fct); 
+%button_save_excel = uicontrol('Style', 'pushbutton', 'String', 'Open Gui Slicer',...
+%        'Units', 'Normalized', 'Position', [0.20 0.9 0.25 0.05],...
+%        'Callback', @buttonpress_save_excel_fct); 
+   
 
+button_cross = uicontrol('Style', 'pushbutton', 'String', 'Set Cross',...
+        'Units', 'Normalized', 'Position', [0.35 0.9 0.15 0.05],...
+        'Callback', '',...
+        'Enable','Off');  
 
 movegui(Img,'onscreen')% To display application onscreen
 movegui(Img,'center') % To display application in the center of screen
@@ -391,28 +427,27 @@ yellow_image = cat(3,ones(size(volume,1)),ones(size(volume,1)), zeros(size(volum
 
 hold on; h_im = imshow(yellow_image); hold off;
 set(h_im,'AlphaData',0.25*seg(:,:,currentSlice));
-set(text1,'String',num2str(currentSlice));  % set slice number in gui 
+set(text1,'String',num2str(currentSlice));  % set slice number in gui
 
 set(findobj(gcf,'type','axes'),'hittest','on');
- 
- set(slider1, 'Min', 1);
- set(slider1, 'Max', size(volume,3));
- set(slider1, 'value', currentSlice);
- set(slider1, 'SliderStep', [1/size(volume,3) 1/size(volume,3)]);
 
- roi_split = seg;
- is_split = zeros(1,size(volume,3));
- cross_split = zeros(size(volume));
- 
- for k=1:size(volume,3),
-     if sum(sum(seg(:,:,k)))==0,
+set(slider1, 'Min', 1);
+set(slider1, 'Max', size(volume,3));
+set(slider1, 'value', currentSlice);
+set(slider1, 'SliderStep', [1/size(volume,3) 1/size(volume,3)]);
+
+is_split = zeros(1,size(volume,3));
+cross_split = zeros(size(volume));
+
+for k=1:size(volume,3),
+    if sum(sum(seg(:,:,k)))==0,
          %thorax_mask = volume(:,:,cur_slice)>-800 & volume(:,:,cur_slice)<500;
          bb = regionprops(inside_mask(:,:,k),'boundingbox');
          bb = round(bb.BoundingBox);
          bb = [bb 0];
      else
          bb = regionprops(seg(:,:,k),'boundingbox');
-         bb =round(bb.BoundingBox);
+         bb = round(bb.BoundingBox);
          bb = [bb 0];
      end
      rect_pos = bb;
@@ -484,6 +519,7 @@ set(findobj(gcf,'type','axes'),'hittest','on');
      cs(round(A2(2)):round(A4(2)), round(A2(1))-2 : round(A2(1))+2) = 1;
      cross_split(:,:,k) = cs;
  end
+
  
 %  for k=1:size(seg,3)
 %     sl = seg(:,:,k);
@@ -521,6 +557,14 @@ set(findobj(gcf,'type','axes'),'hittest','on');
            hold on; h_im = imshow(label2rgb(roi_split(:,:,currentSlice))); hold off;
            set(h_im, 'AlphaData', 0.2*(roi_split(:,:,currentSlice)>0));
         end
+        
+        
+        green_image = cat(3,zeros(size(volume,1)),ones(size(volume,1)), zeros(size(volume,1)));
+        
+        hold on; h = imshow(green_image); hold off;
+        set(h,'AlphaData',0.25*cross_split(:,:,currentSlice));
+        removeCrossLinesHandles(0);
+        
     end
 
 
@@ -562,22 +606,102 @@ set(findobj(gcf,'type','axes'),'hittest','on');
     end
 
     function buttonpress_save_mtlb_fct(h, eventdata)
-
         
         
- 
-        s_uid = ct_info{1}.SeriesInstanceUID;
-        cross_split = cross_split;
-        folder_name = textscan(fn,'%s','delimiter',filesep);
-        folder_name = folder_name{:};
-        folder_name = folder_name(end);
-        folder_name = folder_name{:};
+        %
+        %
+        %         s_uid = ct_info{1}.SeriesInstanceUID;
+        %         cross_split = cross_split;
+        %         folder_name = textscan(fn,'%s','delimiter',filesep);
+        %         folder_name = folder_name{:};
+        %         folder_name = folder_name(end);
+        %         folder_name = folder_name{:};
+        %
+        %         ct_info_resume = ct_info{1};
+        %
+        %         save(strcat(fn,filesep,folder_name,'_roi_split_tobias.mat'),...
+        %             's_uid', 'roi_split', 'cross_split', 'ct_info_resume');
         
-        ct_info_resume = ct_info{1};
         
-        save(strcat(fn,filesep,folder_name,'_roi_split_tobias.mat'),...
-            's_uid', 'roi_split', 'cross_split', 'ct_info_resume');
         
+        
+        %Choose base .NII file
+        %[niiFileName, niiPathName] = uigetfile('*.nii', 'Select the base .nii file');
+        
+        %if niiFileName
+            %nii = load_nii([niiPathName niiFileName]);
+                        %
+            
+            %mask = zeros(size(nii.img));
+            %
+            %
+            % % This is only necessary if there is any data in nii.img, which in this
+            % % setting there is not.
+            %for k=1:size(nii.img,3),
+            %    mask(:,:,k) = fliplr(imrotate(nii.img(:,:,k),90));
+            %end
+            %
+            %
+            %     % Do stuff, result is mask_final
+            %     % Fill in the cross here.
+            %     % Could be as easy as
+            %     % mask_final = mask_cross;
+            mask_final = cross_split;
+            
+            exportDir = uigetdir('Select target place to save all results');
+            
+            if exportDir
+                prompt = {'Select results base name:'};
+                dlg_title = 'Save results';
+                num_lines = 1;
+                def = {'results'};
+                
+                answer = inputdlg(prompt,dlg_title,num_lines,def);
+                
+                if ~isempty(answer{1})
+                    
+                    mask_export = zeros(size(mask_final));
+                    for k=1:size(mask_export,3),
+                        mask_export(:,:,k) = imrotate(fliplr(mask_final(:,:,k)),-90);
+                    end
+                    niiWithSegmentation.img = uint8(mask_export);
+                    
+                    
+                    save_nii(niiWithSegmentation,[exportDir filesep answer{1} '_all_slices_crosses.nii']);
+                    
+                    
+                    maskExportTenSlices = zeros(size(mask_final, 1),...
+                        size(mask_final, 2), 10);
+                    
+                    counter = 1;
+                    for k = listWithIndexes',
+                        maskExportTenSlices(:,:,counter) = imrotate(fliplr(mask_final(:,:,k)),-90);
+                        counter = counter + 1;
+                    end
+                    niiWithOutSegmentation.img = uint8(maskExportTenSlices);                    
+                    
+                    save_nii(niiWithOutSegmentation,[exportDir filesep answer{1} '_10Slices_crosses.nii']);
+                        
+                    
+                    s_uid = ct_info{1}.SeriesInstanceUID;
+                    cross_split = cross_split;
+                    folder_name = textscan(fn,'%s','delimiter',filesep);
+                    folder_name = folder_name{:};
+                    folder_name = folder_name(end);
+                    folder_name = folder_name{:};
+                    
+                    ct_info_resume = ct_info{1};
+                    
+                    %             [fn_export, path_export] = uiputfile('*.mat', 'Select target place to save the .MAT file');
+                    
+                    save([exportDir filesep answer{1} '.mat'],...
+                        's_uid', 'roi_split', 'cross_split', 'ct_info_resume');
+                    
+                    quantitativeAnalysis(ct(:, :, listWithIndexes'),...
+                        ct_info(listWithIndexes), roi_split(:, :, listWithIndexes'), exportDir, answer{1})
+                end
+            end
+            
     end
 
     function buttonpress_save_excel_fct(h, eventdata)
@@ -634,11 +758,11 @@ set(findobj(gcf,'type','axes'),'hittest','on');
         mm_split(P2M>0) = 2;
         mm_split(P3M>0) = 3;
         mm_split(P4M>0) = 4;
-        if nargin==1,
-            mm_split(inside_mask(:,:,currentSlice)==0)=0;
-        else
+        %if nargin==1,
+            %mm_split(inside_mask(:,:,currentSlice)==0)=0;
+        %else
             mm_split( seg(:,:,currentSlice) == 0 ) = 0;
-        end
+        %end
         roi_split(:,:,currentSlice) = mm_split;
         is_split(currentSlice) = 1;
         
@@ -688,6 +812,8 @@ set(findobj(gcf,'type','axes'),'hittest','on');
     end
 
     function perform_split(cur_slice, h)
+        
+        removeCrossLinesHandles(1);
         
         if ishandle(h_line1)
             delete(h_line1);
@@ -754,6 +880,28 @@ set(findobj(gcf,'type','axes'),'hittest','on');
     end
 end
 
+function removeCrossLinesHandles(removeCross)
+%Remove the green cross when before updating it.
+    axesChildren = get(gca, 'Children');
+    %Make sure it will not remove it after update
+    if removeCross
+        set(axesChildren(1), 'Visible', 'Off');
+    end
+    
+    nChildren = length(axesChildren);
+    
+    for idx = 1:nChildren
+        try
+            currentColor = get(axesChildren(idx), 'Color');
+            if isequal(currentColor, [0, 1, 0]);
+                set(axesChildren(idx), 'Visible', 'Off')
+            end
+        catch
+            continue
+        end
+    end
+    
+end
 
 
 function [mask_lung] = convertROItoMask(ct, ct_roi)
@@ -891,3 +1039,271 @@ set(findobj(gcf,'type','axes'),'hittest','off');
     end
 end
     
+
+function nii = load_nii_with_rotation(filePath)
+nii = load_nii(filePath);
+%
+
+mask = zeros(size(nii.img));
+%
+%
+% % This is only necessary if there is any data in nii.img, which in this
+% % setting there is not.
+for k=1:size(nii.img,3),
+    nii.img(:,:,k) = fliplr(imrotate(nii.img(:,:,k),90));
+end
+end
+
+function tenSlicesPath = getTenSlicesPath(filePath)
+allNames = regexp(filePath, filesep, 'split');
+previousPath = [];
+
+
+
+for k = 1:length(allNames) - 1
+    previousPath = [previousPath filesep allNames{k}];
+end
+    previousPath = previousPath(2:end);
+    possiblesPaths = dir([previousPath filesep '*_10Slice']);
+    tenSlicesPath = [previousPath filesep possiblesPaths.name];
+end
+
+
+
+%QUANTITATIVE ANALYSIS
+function quantitativeAnalysis(ct, ct_info, roi_split, exportDir, baseName)
+    
+    if ismac==1,
+        delim = '/';
+    else
+        delim = '\';
+    end
+    
+    
+    
+    %ct_mask = convertROItoMask(ct, ct_roi);
+    ct_mask = roi_split >= 1;
+    
+    %roi_split = ROI_Splitter(ct, ct_mask);
+    
+    s_uid = ct_info{1}.SeriesInstanceUID;
+    
+    % Extract voxel size from DICOM header.
+    ct_spacing_x = ct_info{1}.PixelSpacing(1);
+    ct_spacing_y = ct_info{1}.PixelSpacing(2);
+    ct_slice_thickness = ct_info{1}.SliceThickness;
+    % Compute the volume of one voxel. We need it in ml for the
+    % computations.
+    volume_voxel = ct_spacing_x*ct_spacing_y*ct_slice_thickness;
+    volume_voxel_ml = volume_voxel*0.001;
+    
+    header_vtotal = 1;
+    header_vnon_a = 2;
+    header_vnon_r = 3;
+    header_vpoo_a = 4;
+    header_vpoo_r = 5;
+    header_vnorm_a = 6;
+    header_vnorm_r = 7;
+    header_vhyp_a = 8;
+    header_vhyp_r = 9;
+    header_gascon_a = 10;
+    header_gascon_r = 11;
+    header_mtotal = 12;
+    header_mnon_a = 13;
+    header_mnon_r = 14;
+    header_mpoo_a = 15;
+    header_mpoo_r = 16;
+    header_mnonpo_a = 17;
+    header_mnonpo_r = 18;
+    header_mnorm_a = 19;
+    header_mnorm_r = 20;
+    header_mhyp_a = 21;
+    header_mhyp_r = 22;
+    
+    headers = {'vtotal', 'vnon_a', 'vnon_r', 'vpoo_a', 'vpoo_r', 'vnorm_a', 'vnorm_r', 'vhyp_a', 'vhyp_r', 'gascon_a', 'gascon_r', 'mtotal', 'mnon_a', 'mnon_r', 'mpoo_a', 'mpoo_r', 'mnonpo_a', 'mnonpo_r', 'mnorm_a', 'mnorm_r', 'mhyp_a', 'mhyp_r'};
+
+    raw = cell((size(ct,3)+2)*5+1, 22+4);
+    raw(1,1:4) = {'ROI', 'Slice #', 'Slice position', 'Slice thickness'};
+    raw(1,5:end) = headers;
+
+    % Initialize table with a row for each slice and 24 columns for the 22
+    % measurements + Slice Location + Slice Thickness
+    for k=1:5,
+        slices = zeros(size(ct,3), 22+2);
+        for l=1:size(ct,3),
+
+            ct_slice = ct(:,:,l);
+            if k==5,
+                voxels_lung = ct_slice(ct_mask(:,:,l)==1);
+            else
+                voxels_lung = ct_slice(roi_split(:,:,l)==k);
+            end
+            
+            % Group the voxels according to their HU value.
+            voxels_non  = voxels_lung(voxels_lung>=-100 & voxels_lung<=100);
+            voxels_poor  = voxels_lung(voxels_lung>=-500 & voxels_lung<=-101);
+            voxels_norm  = voxels_lung(voxels_lung>=-900 & voxels_lung<=-501);
+            voxels_hyp  = voxels_lung(voxels_lung>=-1000 & voxels_lung<=-901);
+            voxels_total = voxels_lung(voxels_lung>=-1000 & voxels_lung<=100);
+            
+            % Compute the volume of all voxel groups in [ml].
+            volume_non = length(voxels_non) *volume_voxel_ml;
+            volume_poor = length(voxels_poor) *volume_voxel_ml;
+            volume_norm = length(voxels_norm) *volume_voxel_ml;
+            volume_hyp = length(voxels_hyp) *volume_voxel_ml;
+            volume_all = volume_non + volume_poor + volume_norm + volume_hyp;
+            %volume_whole_lung = length(voxels_lung)*volume_voxel_ml;
+            
+            % Compute the mass of all voxel groups in [g].
+            mass_all = sum((1 + 0.001*double(voxels_total))*volume_voxel_ml);
+            mass_non = sum((1 + 0.001*double(voxels_non))*volume_voxel_ml);
+            mass_poor = sum((1 + 0.001*double(voxels_poor))*volume_voxel_ml);
+            mass_norm = sum((1 + 0.001*double(voxels_norm))*volume_voxel_ml);
+            mass_hyp = sum((1 + 0.001*double(voxels_hyp))*volume_voxel_ml);
+            
+            % Gas content.
+            gascon_r = mean(double(voxels_total)/(-1000.0));
+            gascon_a = (gascon_r * volume_all);
+            
+            % Write the results in the table
+            slices(l, header_vtotal) = volume_all;
+            slices(l, header_vnon_a) = volume_non;
+            %slices(l, header_vnon_r) = volume_non_r;
+            slices(l, header_vpoo_a) = volume_poor;
+            %slices(l, header_vpoo_r) = volume_poor_r;
+            slices(l, header_vnorm_a) = volume_norm;
+            %slices(l, header_vnorm_r) = volume_norm_r;
+            slices(l, header_vhyp_a) = volume_hyp;
+            %slices(l, header_vhyp_r) = volume_hyp_r;
+            slices(l, header_gascon_a) = gascon_a;
+            %slices(l, header_gascon_r) = gascon_r;
+            slices(l, header_mtotal) = mass_all;
+            slices(l, header_mnon_a) = mass_non;
+            %slices(l, header_mnon_r) = mass_non_r;
+            slices(l, header_mpoo_a) = mass_poor;
+            %slices(l, header_mpoo_r) = mass_poor_r;
+            slices(l, header_mnonpo_a) = mass_non + mass_poor;
+            %slices(l, header_mnonpo_r) = mass_non_r + mass_poor_r;
+            slices(l, header_mnorm_a) = mass_norm;
+            %slices(l, header_mnorm_r) = mass_norm_r;
+            slices(l, header_mhyp_a) = mass_hyp;
+            %slices(l, header_mhyp_r) = mass_hyp_r;
+            
+            slices(l, header_mhyp_r+1) = ct_info{l}.SliceLocation;
+            slices(l, header_mhyp_r+2) = ct_info{l}.SliceThickness;
+        
+        end
+        
+         % Since the ordering of the slices might be wrong, sort the rows of the
+         % table by the ascending slice locations.
+         sl = zeros(1,size(ct,3));
+         for l=1:length(ct_info),
+             sl(l)=(ct_info{l}.SliceLocation);
+         end
+         [~, I] = sort(sl,'ascend');
+         slices = slices(I,:);
+         
+         % Compute the extrapolated measurements for each space between slices.
+         slices_ext = zeros(size(ct,3)-1, 22);
+         for l=1:size(ct,3)-1,
+             d = abs(slices(l,header_mhyp_r+1)-slices(l+1,header_mhyp_r+1));
+             t = slices(l,header_mhyp_r+2);
+             X1 = slices(l,1:22);
+             X2 = slices(l+1,1:22);
+             slices_ext(l,:) = d*(X1+X2)/(2*t);
+         end
+         
+         % Compute the final extrapolated lung measurements as the sum of all
+         % extrapolated in-between values plus half of the first and half of the
+         % last slice.
+         lung_ext = zeros(1,22);
+         for l=1:22,
+             lung_ext(l) = sum(slices_ext(:,l)) + 0.5*slices_ext(1,l) + 0.5*slices_ext(end,l);
+         end
+         
+         % Recompute all relative values with respect to v_total and m_total.
+         lung_ext(header_vnon_r) = lung_ext(header_vnon_a)/lung_ext(header_vtotal)*100;
+         lung_ext(header_vpoo_r) = lung_ext(header_vpoo_a)/lung_ext(header_vtotal)*100;
+         lung_ext(header_vnorm_r) = lung_ext(header_vnorm_a)/lung_ext(header_vtotal)*100;
+         lung_ext(header_vhyp_r) = lung_ext(header_vhyp_a)/lung_ext(header_vtotal)*100;
+         lung_ext(header_mnon_r) = lung_ext(header_mnon_a)/lung_ext(header_mtotal)*100;
+         lung_ext(header_mpoo_r) = lung_ext(header_mpoo_a)/lung_ext(header_mtotal)*100;
+         lung_ext(header_mnonpo_r) = lung_ext(header_mnonpo_a)/lung_ext(header_mtotal)*100;
+         lung_ext(header_mnorm_r) = lung_ext(header_mnorm_a)/lung_ext(header_mtotal)*100;
+         lung_ext(header_mhyp_r) = lung_ext(header_mhyp_a)/lung_ext(header_mtotal)*100;
+         lung_ext(header_gascon_r)=lung_ext(header_gascon_a)/lung_ext(header_vtotal)*100;
+         
+         
+         if k==1,
+             roi_name = 'RV';
+         elseif k==2,
+             roi_name = 'LV';
+         elseif k==3,
+             roi_name = 'LD';
+         elseif k==4,
+             roi_name = 'RD';
+         elseif k==5,
+             roi_name = 'All';
+         else
+             roi_name = '';
+         end
+         
+         for m=1:size(ct,3),
+            raw(1 + (k-1)*(size(ct,3)+2) + m, 1) = {roi_name};
+            raw(1 + (k-1)*(size(ct,3)+2) + m, 2) = {m};
+            raw(1 + (k-1)*(size(ct,3)+2) + m, 3) = {slices(m, 23)};
+            raw(1 + (k-1)*(size(ct,3)+2) + m, 4) = {slices(m, 24)};
+            for n = 1:22,
+                raw(1 + (k-1)*(size(ct,3)+2) + m, 4+n) = {slices(m, n)};
+            end
+         end
+         
+         raw(1 + (k-1)*(size(ct,3)+2) + size(ct,3)+1, 2) = {'% ROI'};
+         raw(1 + (k-1)*(size(ct,3)+2) + size(ct,3)+2, 2) = {'% Lung'};
+         
+         for n=1:22,
+             raw(1 + (k-1)*(size(ct,3)+2) + size(ct,3)+1, 4+n) = {lung_ext(n)};
+             raw(1 + (k-1)*(size(ct,3)+2) + size(ct,3)+2, 4+n) = {lung_ext(n)};
+         end
+    end
+    
+    for k=1:4,
+       
+        lung_ext_new = zeros(size(lung_ext));
+        for n=1:22,
+           lung_ext_new(n) = raw{1 + (k-1)*(size(ct,3)+2) + size(ct,3) + 1, 4+n}; 
+        end
+        % Recompute all relative values with respect to v_total and m_total.
+        lung_ext_new(header_vnon_r) = lung_ext_new(header_vnon_a)/lung_ext(header_vtotal)*100;
+        lung_ext_new(header_vpoo_r) = lung_ext_new(header_vpoo_a)/lung_ext(header_vtotal)*100;
+        lung_ext_new(header_vnorm_r) = lung_ext_new(header_vnorm_a)/lung_ext(header_vtotal)*100;
+        lung_ext_new(header_vhyp_r) = lung_ext_new(header_vhyp_a)/lung_ext(header_vtotal)*100;
+        lung_ext_new(header_mnon_r) = lung_ext_new(header_mnon_a)/lung_ext(header_mtotal)*100;
+        lung_ext_new(header_mpoo_r) = lung_ext_new(header_mpoo_a)/lung_ext(header_mtotal)*100;
+        lung_ext_new(header_mnonpo_r) = lung_ext_new(header_mnonpo_a)/lung_ext(header_mtotal)*100;
+        lung_ext_new(header_mnorm_r) = lung_ext_new(header_mnorm_a)/lung_ext(header_mtotal)*100;
+        lung_ext_new(header_mhyp_r) = lung_ext_new(header_mhyp_a)/lung_ext(header_mtotal)*100;
+        lung_ext_new(header_gascon_r)=lung_ext_new(header_gascon_a)/lung_ext(header_vtotal)*100;
+        
+        for n=1:22,
+             raw(1 + (k-1)*(size(ct,3)+2) + size(ct,3)+2, 4+n) = {lung_ext_new(n)};
+         end
+        
+    end
+    
+%     folder_name = textscan(fn,'%s','delimiter',delim);
+%     folder_name = folder_name{:};
+%     folder_name = folder_name(end);
+%     folder_name = folder_name{:};
+%     
+%     ct_info = ct_info{1};
+%     
+
+
+xlwrite([exportDir filesep baseName '.xls'], raw);
+msgbox('Results Successfully saved', 'Results saved')
+     
+%    %save(strcat(fn,delim,folder_name,'_roi_split.mat'), 's_uid', 'roi_split', 'ct_info');
+
+end
+
