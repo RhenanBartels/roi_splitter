@@ -673,6 +673,10 @@ for k=1:size(volume,3),
                     maskExportTenSlices = zeros(size(mask_final, 1),...
                         size(mask_final, 2), 10);
                     
+                    if listWithIndexes(end) > size(mask_final, 3)
+                        listWithIndexes(end) = listWithIndexes(end) - 1;
+                    end
+                     
                     counter = 1;
                     for k = listWithIndexes',
                         maskExportTenSlices(:,:,counter) = imrotate(fliplr(mask_final(:,:,k)),-90);
